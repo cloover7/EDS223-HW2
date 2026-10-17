@@ -8,8 +8,35 @@ library(tmap)
 # read in geodatabase of EJScreen data at the Census Block Group level
 ejscreen <- sf::st_read(here::here("data", "ejscreen","EJSCREEN_2023_BG_StatePct_with_AS_CNMI_GU_VI.gdb")) 
 
+# filter to a state you are interested in
+state <- ejscreen %>%
+  dplyr::filter(ST_ABBREV == "CA") 
+
+# filter to a county you are interested in
+county <- ejscreen %>%
+  dplyr::filter(CNTY_NAME %in% c("Los Angeles County"))
+
 redlining <- sf::st_read(here::here('data', 'mapping-inequality', 'mapping-inequality-los-angeles.json'))
 
 crashes <- read_csv('data/SWITRS_LA/Crashes.csv')
+
+```
+
+
+```{r}
+#| fig-width: 10
+#| fig-height: 7
+tm_shape(county) +
+    tm_polygons() +
+tm_shape(redlining) +
+    tm_fill(
+        fill = 'grade',
+        fill.legend = tm_legend(title = 'Redlining Grade')
+    ) 
+```
+
+
+```{r}
+
 
 ```
