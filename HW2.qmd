@@ -1,0 +1,15 @@
+
+```{r}
+library(tidyverse)
+library(sf)
+library(here)
+library(tmap)
+
+# read in geodatabase of EJScreen data at the Census Block Group level
+ejscreen <- sf::st_read(here::here("data", "ejscreen","EJSCREEN_2023_BG_StatePct_with_AS_CNMI_GU_VI.gdb")) 
+
+redlining <- sf::st_read(here::here('data', 'mapping-inequality', 'mapping-inequality-los-angeles.json'))
+
+crashes <- read_csv('data/SWITRS_LA/Crashes.csv')
+
+```
