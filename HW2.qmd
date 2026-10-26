@@ -1,9 +1,29 @@
+---
+title: EDS 223 - Homework 2
+author: Erin Yang
+format: pdf
+execute: 
+  warning: false
+---
+
+In this assignment, we explore environmental injustices in relation to redlining in LA via the EPA's EJScreen tool, redlining data, and la accident data. EJScreen compiles data for many environmental and socioeconomic metrics to measure environmental and health inequities. Unfortunately it has currently been taken down from the US EPA website, but a functional unofficial version exists (linked below). The redlining data was acquired from [Mapping Inequality](https://dsl.richmond.edu/panorama/redlining/#loc=5/39.1/-94.58) which provides data and analysis for historical redlining issues. The crash data comes from UC Berkeley's [Transportation Injury Mapping System](https://tims.berkeley.edu/).
+
+- [Data Download](https://drive.google.com/file/d/1nG6Nj1bXfzQFOVMO8Km3eNy4SWu1YcIQ/view)
+- [Unofficial EJScreen](https://pedp-ejscreen.azurewebsites.net/)
+- [Mapping Inequality](https://dsl.richmond.edu/panorama/redlining/#loc=5/39.1/-94.58)
+- [Transportation Injury Mapping System](https://tims.berkeley.edu/)
+- [EDS 223 Assigment](https://eds-223-geospatial.github.io/assignments/HW2.html)
+
+
+# Part 1: Redlining's Legacy in LA
+
 
 ```{r}
 library(tidyverse)
 library(sf)
 library(here)
 library(tmap)
+library(gt)
 
 # read in geodatabase of EJScreen data at the Census Block Group level
 ejscreen <- sf::st_read(here::here("data", "ejscreen","EJSCREEN_2023_BG_StatePct_with_AS_CNMI_GU_VI.gdb")) 
@@ -17,6 +37,7 @@ county <- ejscreen %>%
   dplyr::filter(CNTY_NAME %in% c("Los Angeles County"))
 
 redlining <- sf::st_read(here::here('data', 'mapping-inequality', 'mapping-inequality-los-angeles.json'))
+redlining <- st_transform(redlining, crs = st_crs(county))
 
 crashes <- read_csv('data/SWITRS_LA/Crashes.csv')
 
@@ -26,17 +47,126 @@ crashes <- read_csv('data/SWITRS_LA/Crashes.csv')
 ```{r}
 #| fig-width: 10
 #| fig-height: 7
-tm_shape(county) +
-    tm_polygons() +
+
+grade_colors <- c('#3DE34E', '#3F9AEB', '#F0D73C', '#E33636')
+
 tm_shape(redlining) +
     tm_fill(
-        fill = 'grade',
+        col = 'grade',
+        palette = grade_colors,
         fill.legend = tm_legend(title = 'Redlining Grade')
-    ) 
+    ) +
+    tm_scalebar() +
+    tm_layout(title = 'Redlining Grades in LA County', text.size = 10, asp = 0, inner.margins = 0.2) +
+    tm_basemap()
 ```
 
 
 ```{r}
+# table w holc grade summary stats
+la_redlining <- st_join(redlining, county)
+if(st_crs(redlining) != st_crs(county)) stop("crs are not the same! fix!")
 
+# group by grade
+redlining_group <- la_redlining |> 
+  st_drop_geometry(la_redlining) |> 
+  group_by(grade) |> 
+  summarize('proportion of population' = n() / nrow(la_redlining))
 
+redlining_group |> 
+  gt() |> 
+    tab_header(title = md("Percentage of Census Block Groups Per HOLC Grade"))
 ```
+
+Now lets add in EJScreen variables!
+
+```{r}
+# groupby and find means of ejscreen variables
+ej_redline <- la_redlining |> 
+  group_by(grade) |> 
+  summarize(low_income = mean(LOWINCOME / ACSTOTPOP, na.rm = TRUE),
+            pm2.5 = mean(P_PM25, na.rm = TRUE),
+            life_exp = mean(P_LIFEEXPPCT, na.rm = TRUE)
+            )
+
+# plot low income
+p1 <- ej_redline |> ggplot(aes(x = grade, y = low_income, fill = grade)) +
+  geom_col() +
+  scale_fill_manual(values = grade_colors) +
+  labs(y = 'Percentage Low Income', title = 'LA Average Low Income Percentage per Redlining Grade')
+p1
+
+# plot pm2.5
+p2 <- ej_redline |> ggplot(aes(x = grade, y = pm2.5, fill = grade)) +
+  geom_col() +
+  scale_fill_manual(values = grade_colors) +
+  labs(y = 'Percentile PM2.5', title = 'LA Average PM2.5 Percentile per Redlining Grade')
+
+p2
+
+# plot low life expectancy
+p3 <- ej_redline |> ggplot(aes(x = grade, y = life_exp, fill = grade)) +
+  geom_col() +
+  scale_fill_manual(values = grade_colors) +
+  labs(y = 'Percentile Low Life Expectancy', title = 'LA Average Low Life Expectancy Percentile per Redlining Grade')
+
+p3
+```
+
+The percentile PM2.5 exposure levels are about the same in all areas of LA. They are all consistently very high, between 70 and 80th percentile, probably because LA is such a large urban city and there are high levels of pollution everywhere. As for low life expectancy percentile and low income proportion, the patterns are extremely similar, with an increase in each as the grade decreases from A to D. It is important to note that there are considerable NA values, which also fall between redlining levels C and D. The increase in low income percentage and low life expectancy percentile as redlining grades worsen is an example how these historical decisions rooted in prejudice still disproportionately affect vulnerable communities today. "D" class neighborhoods have on average over double the proportion low income residents as "A" class neighborhoods. They are also at about double the percentile for low life expectancy. These environmental injustices are real and will only be ameliorated if seriously addressed.
+
+# Part 2: Legacy of Redlining in Pedstrian and Bike Accidents
+
+
+```{r}
+# only ped and bike accidents
+peds_bikes <- crashes |>
+  filter(PEDESTRIAN_ACCIDENT == "Y" | BICYCLE_ACCIDENT == "Y") |> 
+  filter(POINT_X != 'NA')
+
+crash_sf <- st_as_sf(peds_bikes, coords = c("POINT_X", "POINT_Y"), crs = 4326)
+
+# Transform crash dots to HOLC map CRS
+st_crs(crash_sf) == st_crs(la_redlining)
+crash_sf <- st_transform(crash_sf, crs = st_crs(la_redlining))
+
+# check whether or not points overlap
+if(any(st_intersects(crash_sf, la_redlining, sparse = FALSE)) == TRUE){
+  print("points overlap")
+} else{
+  warning("points don't overlap")
+}
+
+# Subset points only within HOLC regions
+HOLC_crashes <- crash_sf[la_redlining, ]
+
+Crashes_left_join <- st_join(HOLC_crashes, la_redlining) |> 
+  select(id = ID, region = grade)
+
+# Summarise HOLC grades with most crashes
+crashes_df <- Crashes_left_join |> 
+  filter(!is.na(region)) |> 
+  group_by(region) |> 
+  summarise(n_points = n()) |> 
+  st_drop_geometry()
+
+crashes_p <- crashes_df |> 
+  mutate(Percentage = 100*(n_points/sum(crashes_df$n_points)))
+crashes_p$region <- as.factor(crashes_p$region)
+crashes_p$Percentage <- as.double(crashes_p$Percentage)
+
+crashes_p
+```
+
+
+```{r}
+# graph percentage bike and pedestrian crashes
+p4 <- ggplot(crashes_p, aes(x = region, y = Percentage, fill = region)) +
+  geom_col() +
+  scale_fill_manual(values = grade_colors) +
+  labs(y = 'Percentage Bike and Pedestrian Crashes', title = 'LA Percentage Bike and Pedestrian Crashes per Redlining Grade')
+
+p4
+```
+
+The vast majority of crashes occur within redlining grades C and D. This is another factor showing how people living in these neighborhoods are more at-risk, whether it's environmental health issues or transportation accidents. This is clearly unjust for the high proportion of POC and low-income residents that live in these areas. Considerably more effort and resources need to be put in to even the playing field and improve the health and safety of historically red-lined neighborhoods. The end of the use of redlining grades is evidently not enough since these social disparities are still prevalent.
